@@ -54,7 +54,7 @@ namespace LyncDemo
                 DS.Tables.Add(TableName);
                 DS.Tables[TableName].Columns.Add("User", typeof(string));
                 DS.Tables[TableName].Columns.Add("Status", typeof(string));
-                DS.Tables[TableName].Columns.Add("Change Time)", typeof(string));
+                DS.Tables[TableName].Columns.Add("Change Time", typeof(string));
                 DS.Tables[TableName].Columns.Add("State Time", typeof(string));
                 DS.Tables[TableName].Columns.Add("Email", typeof(string));
                 DS.Tables[TableName].PrimaryKey = new System.Data.DataColumn[] { DS.Tables[TableName].Columns[DS.Tables[TableName].Columns.IndexOf("User")] };
