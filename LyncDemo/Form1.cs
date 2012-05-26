@@ -168,7 +168,7 @@ namespace LyncDemo
 
         private void LogChange(Contact contact, ContactInformationChangedEventArgs e, string StateTime, string TimeOfEvent, string oldState, string newState)
         {
-            string Log = contact.GetContactInformation(ContactInformationType.PrimaryEmailAddress) + "," + TimeOfEvent  + ","  + StateTime +","+ oldState + "," + newState;
+            string Log = contact.GetContactInformation(ContactInformationType.PrimaryEmailAddress) + "," + TimeOfEvent  + ","  + StateTime +","+ oldState + "," + newState+"\r\n";
             File.AppendAllText(LogFile, Log);
         }
 
