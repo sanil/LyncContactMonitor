@@ -9,11 +9,10 @@ namespace LyncDemo
 {
     public partial class Form1 : Form
     {
-        public System.Data.DataSet DS;
-        
-        string TableName = "LyncUsers", DataSetName= "Lync";
+        string TableName = "LyncUsers";
         int offset = 50;
         string FileName = Path.Combine(Application.StartupPath,"Lync.xml");
+        string LogFile = Path.Combine(Application.StartupPath, "LogFile.csv");
         List<Contact> contacts;
         LyncClient lyncClient;
 
@@ -23,6 +22,10 @@ namespace LyncDemo
             if (lyncClient == null)
             {
                 lyncClient = LyncClient.GetClient();
+                if (lyncClient != null)
+                {
+                    toolStripStatusLabel.Text = "State: " + lyncClient.State.ToString();
+                }
                 lyncClient.StateChanged += new EventHandler<ClientStateChangedEventArgs>(lyncClient_StateChanged);
             }
             contacts = new List<Contact>();
@@ -33,37 +36,45 @@ namespace LyncDemo
         {
             if (e.NewState != ClientState.SignedIn)
             {
-                MessageBox.Show("Lync state changed: " + e.NewState.ToString() + "\r\n Waiting for signing in again");
+                toolStripStatusLabel.Text = "State: " + e.NewState.ToString();
                 System.Threading.Thread.Sleep(10000);
             }
         }
 
         public void InitDataSet()
         {
-            DS = new System.Data.DataSet(DataSetName);
             if (File.Exists(FileName))
             {
-                DS.ReadXml(FileName);
-                foreach (System.Data.DataRow row in DS.Tables[TableName].Rows)
+                Lync.ReadXml(FileName);
+                foreach (System.Data.DataRow row in Lync.Tables[TableName].Rows)
                 {
                     AddContact((string)row.ItemArray[4]);
                 }
             }
-            else
-            {                
-                DS.Tables.Add(TableName);
-                DS.Tables[TableName].Columns.Add("User", typeof(string));
-                DS.Tables[TableName].Columns.Add("Status", typeof(string));
-                DS.Tables[TableName].Columns.Add("Change Time", typeof(string));
-                DS.Tables[TableName].Columns.Add("State Time", typeof(string));
-                DS.Tables[TableName].Columns.Add("Email", typeof(string));
-                DS.Tables[TableName].PrimaryKey = new System.Data.DataColumn[] { DS.Tables[TableName].Columns[DS.Tables[TableName].Columns.IndexOf("User")] };
-            }
-            dataGridView.DataSource = DS;
-            dataGridView.DataMember = TableName;
-
             timer1.Start();
-            RefreshStatus();
+        }
+
+        public void GetInfo(string UserName)
+        {
+            if (lyncClient == null)
+            {
+                lyncClient = LyncClient.GetClient();
+            }
+            if (lyncClient.State == ClientState.SignedIn)
+            {
+                try
+                {
+                    Contact contact = lyncClient.ContactManager.GetContactByUri("sip:" + UserName);
+                    contacts.Add(contact);
+                    contact.ContactInformationChanged += new System.EventHandler<ContactInformationChangedEventArgs>(contact_ContactInformationChanged);
+                    Microsoft.Lync.Model.ContactAvailability availability = (Microsoft.Lync.Model.ContactAvailability)contact.GetContactInformation(ContactInformationType.Availability);
+                    string Name = (string)contact.GetContactInformation(ContactInformationType.DisplayName);
+                    Lync.Tables[TableName].Rows.Add(new string[] { Name, availability.ToString(), "0", "0", UserName });
+                }
+                catch
+                { }
+                RefreshStatus();
+            }
         }
         public void AddContact(string UserName)
         {
@@ -83,9 +94,10 @@ namespace LyncDemo
                     string Name = (string)contact.GetContactInformation(ContactInformationType.DisplayName);
                     for (int rowIndex = 0; rowIndex < dataGridView.Rows.Count; rowIndex++)
                     {
-                        if ((string)dataGridView.Rows[rowIndex].Cells["User"].Value == Name)
+                        if ((string)dataGridView.Rows[rowIndex].Cells["UserName"].Value == Name)
                         {
                             dataGridView.Rows[rowIndex].Cells["Status"].Value = availability.ToString();
+                            dataGridView.Rows[rowIndex].Cells["StatusImage"].Value = GetImage(availability.ToString());
                             break;
                         }
                     }
@@ -104,40 +116,16 @@ namespace LyncDemo
                     Contact contact = lyncClient.ContactManager.GetContactByUri("sip:" + email);
                     Microsoft.Lync.Model.ContactAvailability availability = (Microsoft.Lync.Model.ContactAvailability)contact.GetContactInformation(ContactInformationType.Availability);
                     dataGridView.Rows[rowIndex].Cells["Status"].Value = availability.ToString();
-                    Color rowColor = GetColor(availability.ToString());
+                    //Color rowColor = GetColor(availability.ToString());
 
                     DataGridViewCellCollection cells = dataGridView.Rows[rowIndex].Cells;
-                    foreach (DataGridViewCell cell in cells)
-                    {
-                        cell.Style.BackColor = rowColor;
-                    }
+                    cells["StatusImage"].Value = GetImage(availability.ToString());
                 }
             }
             catch { } //Bad Programming
         }
 
-        public void GetInfo(string UserName)
-        {
-            if (lyncClient == null)
-            {
-                lyncClient = LyncClient.GetClient();
-            }
-            if (lyncClient.State == ClientState.SignedIn)
-            {
-                try
-                {
-                    //Contact contact = lyncClient.ContactManager.GetContactByUri("sip:sourav.sengupta@accenture.com");
-                    Contact contact = lyncClient.ContactManager.GetContactByUri("sip:" + UserName);
-                    contacts.Add(contact);
-                    contact.ContactInformationChanged += new System.EventHandler<ContactInformationChangedEventArgs>(contact_ContactInformationChanged);
-                    Microsoft.Lync.Model.ContactAvailability availability = (Microsoft.Lync.Model.ContactAvailability)contact.GetContactInformation(ContactInformationType.Availability);
-                    string Name = (string)contact.GetContactInformation(ContactInformationType.DisplayName);
-                    System.Data.DataRow row = DS.Tables[TableName].Rows.Add(new string[] { Name, availability.ToString(), "0", "0", UserName });
-                }
-                catch
-                { }
-            }
-        }
+        
 
         void contact_ContactInformationChanged(object sender, ContactInformationChangedEventArgs e)
         {
@@ -151,11 +139,18 @@ namespace LyncDemo
                     string Name = (string)contact.GetContactInformation(ContactInformationType.DisplayName);
                     for (int rowIndex = 0; rowIndex < dataGridView.Rows.Count; rowIndex++)
                     {
-                        if ((string)dataGridView.Rows[rowIndex].Cells["User"].Value == Name)
+                        if ((string)dataGridView.Rows[rowIndex].Cells["UserName"].Value == Name)
                         {
+                            string StateTime = dataGridView.Rows[rowIndex].Cells["StateTime"].Value.ToString();
+                            string now = DateTime.Now.ToString("hh:mm:ss tt dd-MMM");
+                            string OldState = dataGridView.Rows[rowIndex].Cells["Status"].Value.ToString();
+                            string NewState = availability.ToString();
+
                             dataGridView.Rows[rowIndex].Cells["Status"].Value = availability.ToString();
-                            dataGridView.Rows[rowIndex].Cells["Change Time"].Value = DateTime.Now.ToString("hh:mm:ss tt dd-MMM");
-                            dataGridView.Rows[rowIndex].Cells["State Time"].Value = "0";
+                            dataGridView.Rows[rowIndex].Cells["ChangeTime"].Value = now;
+                            dataGridView.Rows[rowIndex].Cells["StateTime"].Value = "0";
+                            dataGridView.Rows[rowIndex].Cells["StatusImage"].Value = GetImage(availability.ToString());
+                            LogChange(contact,e,StateTime,now, OldState, NewState);
                             break;
                         }
                     }
@@ -165,10 +160,16 @@ namespace LyncDemo
             {
                 if (lyncClient.State != ClientState.SignedIn)
                 {
-                    MessageBox.Show("Waiting for Lync to sign in\r\n"+ex.Message);
+                    toolStripStatusLabel.Text = "Waiting for Lync to sign in... " + ex.Message;
                     System.Threading.Thread.Sleep(10000);
                 }
             }
+        }
+
+        private void LogChange(Contact contact, ContactInformationChangedEventArgs e, string StateTime, string TimeOfEvent, string oldState, string newState)
+        {
+            string Log = contact.GetContactInformation(ContactInformationType.PrimaryEmailAddress) + "," + TimeOfEvent  + ","  + StateTime +","+ oldState + "," + newState;
+            File.AppendAllText(LogFile, Log);
         }
 
         private void button1_Click(object sender, System.EventArgs e)
@@ -176,6 +177,7 @@ namespace LyncDemo
             if (textBox1.Text.Length == 0)
             {
                 errorProvider1.SetError(textBox1, "Text box must not be empty");
+                toolStripStatusLabel.Text = "Text box must not be empty";
                 errorProvider1.SetIconAlignment(textBox1, ErrorIconAlignment.MiddleLeft);
                 errorProvider1.SetIconPadding(textBox1, -20);
                 return;
@@ -195,32 +197,58 @@ namespace LyncDemo
 
         private void Form1_FormClosing(object sender, FormClosingEventArgs e)
         {
-            DS.WriteXml(FileName,System.Data.XmlWriteMode.WriteSchema);
+            Lync.WriteXml(FileName,System.Data.XmlWriteMode.WriteSchema);
         }
 
         private void dataGridView_CellValueChanged(object sender, DataGridViewCellEventArgs e)
         {
-            DataGridViewCellCollection cells = dataGridView.Rows[e.RowIndex].Cells;
-            Color cellColor;
-            try
+            if (dataGridView.Columns[e.ColumnIndex].Name != "StatusImage")
             {
-                cellColor = GetColor((string)cells["Status"].Value);
+                if (e.RowIndex >= 0)
+                {
+                    DataGridViewCellCollection cells = dataGridView.Rows[e.RowIndex].Cells;
+                    string availability;
+                    try
+                    {
+                        availability = (string)cells["Status"].Value;
+                    }
+                    catch
+                    {
+                        availability = "None";
+                    }
+                    //foreach (DataGridViewCell cell in cells)
+                    //{
+                    //    cell.Style.BackColor = cellColor;
+                    //}
+                    dataGridView.Rows[e.RowIndex].Cells["StatusImage"].Value = GetImage(availability.ToString());
+                }
             }
-            catch
+        }
+
+        public Image GetImage(string availability)
+        {
+            Image img = (Image)new Bitmap(32, 32);
+            Color col = GetColor(availability);
+            using (Graphics g = Graphics.FromImage(img))
             {
-                cellColor = Color.White;
+                System.Drawing.Drawing2D.LinearGradientBrush LGB = new System.Drawing.Drawing2D.LinearGradientBrush(new RectangleF(0.0f, 8.0f, 16.0f, 32.0f),Color.White, col, System.Drawing.Drawing2D.LinearGradientMode.ForwardDiagonal);
+                Brush c = (Brush)LGB;
+                using (Brush b = new SolidBrush(GetColor(availability)))
+                {
+                    g.CompositingQuality = System.Drawing.Drawing2D.CompositingQuality.GammaCorrected;
+                    g.DrawEllipse(new Pen(col, 0.1f), new Rectangle(8, 8, 16, 16));
+                    g.FillEllipse(c, new Rectangle(8,8, 16, 16));
+                }
+                LGB.Dispose();
             }
-            foreach (DataGridViewCell cell in cells)
-            {
-                cell.Style.BackColor = cellColor;
-            }
+            return img;
         }
 
         public Color GetColor(string availability)
         {
-            if (availability == "Away")
+            if (availability == "Away") // todo : convert this into switch statements
             {
-                return Color.Yellow;
+                return Color.Gold;
             }
             if (availability == "DoNotDisturb")
             {
@@ -228,7 +256,7 @@ namespace LyncDemo
             }
             if (availability == "Busy")
             {
-                return Color.Orange;
+                return Color.Tomato;
             }
             if (availability == "FreeIdle")
             {
@@ -236,22 +264,21 @@ namespace LyncDemo
             }
             if (availability == "Free")
             {
-                return Color.Green;
+                return Color.LimeGreen;
             }
             if (availability == "Offline")
             {
-                return Color.LightGray;
+                return Color.Silver;
             }
             return Color.White;
         }
 
         private void dataGridView_RowValidated(object sender, DataGridViewCellEventArgs e)
         {
-            DataGridViewCellCollection cells = dataGridView.Rows[e.RowIndex].Cells;
-            Color cellColor = GetColor((string)cells["Status"].Value);
-            foreach (DataGridViewCell cell in cells)
+            if (dataGridView.Columns[e.ColumnIndex].Name != "StatusImage")
             {
-                cell.Style.BackColor = cellColor;
+                DataGridViewCellCollection cells = dataGridView.Rows[e.RowIndex].Cells;
+                dataGridView.Rows[e.RowIndex].Cells["StatusImage"].Value = GetImage((string)cells["Status"].Value.ToString());
             }
         }
 
@@ -262,19 +289,20 @@ namespace LyncDemo
 
         private void timer1_Tick(object sender, EventArgs e)
         {
+            RefreshStatus();
             for (int rowIndex = 0; rowIndex < dataGridView.Rows.Count; rowIndex++)
             {
                 int time;
                 try
                 {
-                    time = int.Parse((string)dataGridView.Rows[rowIndex].Cells["State Time"].Value);
+                    time = int.Parse((string)dataGridView.Rows[rowIndex].Cells["StateTime"].Value);
                 }
                 catch
                 {
                     time = 0;
                 }
                 time++;
-                dataGridView.Rows[rowIndex].Cells["State Time"].Value = time.ToString();
+                dataGridView.Rows[rowIndex].Cells["StateTime"].Value = time.ToString();
             }
         }
 
@@ -282,5 +310,11 @@ namespace LyncDemo
         {
             RefreshStatus();
         }
+
+        private void dataGridView_RowsAdded(object sender, DataGridViewRowsAddedEventArgs e)
+        {
+            RefreshStatus();
+        }
+
     }
 }
